@@ -4,15 +4,14 @@ import logging
 from logging.handlers import RotatingFileHandler
 from http import HTTPStatus
 
-
 import requests
 import telegram
 from dotenv import load_dotenv
 
 from exceptions import (
     RequestApiError, HTTPStatusError, JSONDecodeError,
-    ResponseAPIError, ResponseApiStatus, InvalidTokenException
-
+    ResponseAPIError, ResponseApiStatus, InvalidTokenException,
+    EmptyListExc,
 )
 
 load_dotenv()
@@ -21,7 +20,7 @@ logger.setLevel(logging.DEBUG)
 handler = RotatingFileHandler('my_logger.log',
                               encoding='UTF-8',
                               maxBytes=50000000,
-                              backupCount=5
+                              backupCount=5,
                               )
 logger.addHandler(handler)
 formatter = logging.Formatter(
@@ -109,14 +108,17 @@ def check_response(response: dict) -> dict:
     """
     if not isinstance(response, dict):
         raise TypeError('Ответ API не является словарем')
-    if 'homeworks' not in response:
-        raise ResponseAPIError('Ошибка словаря по ключу homeworks')
     homeworks = response.get('homeworks')
+    if homeworks is None:
+        raise ResponseAPIError('Ошибка словаря по ключу homeworks')
     if not isinstance(homeworks, list):
         raise TypeError('Ответ API не является списком')
     if not homeworks:
-        raise ResponseApiStatus('Новых статусов нет')
-    return homeworks
+        raise EmptyListExc('Новых статусов нет')
+    try:
+        return homeworks
+    except HTTPStatusError as error:
+        raise (f'Из ответа не получен список работ: {error}')
 
 
 def parse_status(homework: dict) -> str:
@@ -125,12 +127,12 @@ def parse_status(homework: dict) -> str:
     работ. В случае успеха, функция возвращает подготовленную для отправки в
     Telegram строку, содержащую один из вердиктов словаря HOMEWORK_VERDICTS.
     """
-    if 'homework_name' not in homework:
+    homework_name = homework.get('homework_name')
+    homework_status = homework.get('status')
+    if homework_name is None:
         raise KeyError('Отсутствует ключ "homework_name" в ответе API')
-    if 'status' not in homework:
+    if homework_status is None:
         raise KeyError('Отсутствует ключ "status" в ответе API')
-    homework_name = homework['homework_name']
-    homework_status = homework['status']
     if homework_status not in HOMEWORK_VERDICTS:
         raise ResponseApiStatus(
             f'Неизвестный статус работы: {homework_status}'
@@ -153,6 +155,7 @@ def main() -> None:
     while True:
         try:
             response = get_api_answer(timestamp)
+            timestamp = response.get('current_date')
             homeworks = check_response(response)
             status = parse_status(homeworks[0])
             if status != last_status:
@@ -160,9 +163,11 @@ def main() -> None:
                 last_status = status
             else:
                 logger.info('В ответе отсутствуют новые статусы работ')
-            timestamp = response['current_date']
-        except (ResponseAPIError, TypeError, KeyError) as error:
-            message = f'Сбой в работе программы: {error}'
+        except (
+            ResponseAPIError, TypeError, KeyError,
+            JSONDecodeError, Exception, EmptyListExc
+        ) as error:
+            message = f'{error}'
             logger.error(message)
             if message != last_error:
                 send_message(bot, message)

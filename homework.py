@@ -115,10 +115,7 @@ def check_response(response: dict) -> dict:
         raise TypeError('Ответ API не является списком')
     if not homeworks:
         raise EmptyListExc('Новых статусов нет')
-    try:
-        return homeworks
-    except HTTPStatusError as error:
-        raise (f'Из ответа не получен список работ: {error}')
+    return homeworks
 
 
 def parse_status(homework: dict) -> str:
@@ -133,11 +130,11 @@ def parse_status(homework: dict) -> str:
         raise KeyError('Отсутствует ключ "homework_name" в ответе API')
     if homework_status is None:
         raise KeyError('Отсутствует ключ "status" в ответе API')
-    if homework_status not in HOMEWORK_VERDICTS:
+    verdict = HOMEWORK_VERDICTS.get(homework_status)
+    if verdict is None:
         raise ResponseApiStatus(
             f'Неизвестный статус работы: {homework_status}'
         )
-    verdict = HOMEWORK_VERDICTS[homework_status]
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
 
